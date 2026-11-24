@@ -1,0 +1,2321 @@
+---
+  title: "随机森林分类 Random Forest Classification"
+author: "HongBiao Tang"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+  theme: cayman
+highlight: github
+---
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F,
+                      collapse = TRUE,
+                      comment = "#>", 
+                      fig.show='asis',fig.width=10, fig.height=12,
+                      fig.align="center"
+)
+```
+
+
+
+# R包安装与加载
+
+```{r}
+package_list <- c("randomForest","ggplot2","pheatmap")
+# 判断R包加载是否成功来决定是否安装后再加载
+for(p in package_list){
+  if(!suppressWarnings(suppressMessages(require(p, character.only = TRUE, quietly = TRUE, warn.conflicts = FALSE)))){
+    install.packages(p, repos=site)
+    suppressWarnings(suppressMessages(library(p, character.only = TRUE, quietly = TRUE, warn.conflicts = FALSE)))
+  }
+}
+library(randomForest)
+library(ggplot2)
+library(pheatmap)
+library(pROC)
+library(ggsci)
+library(caret)
+source("/opt/script/stat_plot_functions.R")
+```
+
+# tax_bac_rf
+
+```{bash}
+# 读取实验设计、Feature表，并进行数据筛选和交叉筛选
+cp ~/koji/16S/result/metadata.tsv metadata_bac.tsv
+cp ~/koji/16S/result/07_tax/sum_g.txt sum_g_bac.txt
+cp ~/koji/16S/result/taxonomy.txt taxonomy_bac.txt
+
+```
+# tax_fun_rf
+```{bash}
+#　读取实验设计、Feature表，并进行数据筛选和交叉筛选
+cp ~/koji/ITS/result/metadata.tsv metadata_fun.tsv
+cp ~/koji/ITS/result/07_tax/sum_g.txt sum_g_fun.txt
+cp ~/koji/ITS/result/taxonomy.txt taxonomy_fun.txt
+
+
+```
+
+# Materials_bac
+```{r}
+Group="Materials"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(DSK  =5, WSK =1, WSM=1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 17
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+
+
+
+# Materials_fun
+
+```{r}
+Group="Materials"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(DSK  =50, WSK =1, WSM=1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 36
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+# Location_bac
+```{r}
+Group="Location"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000)
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 61
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+# Location_fun
+
+```{r}
+Group="Location"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(Jiangmen   =1, Korea  =1, Shandong =5, Sichuan =3))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE)
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 19
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+# Equipment_bac
+```{r}
+Group="Equipment"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(Koji_disk   =5, Koji_pool  =1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 50
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+# Equipment_fun
+
+```{r}
+Group="Equipment"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(Koji_disk   =2, Koji_pool  =1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 44
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+
+
+# Process_bac
+```{r}
+Group="Process"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000)
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 29
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+
+# Process_fun
+
+```{r}
+Group="Process"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(ITS_Koji    =1, ITS_Meju   =50))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 29
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+
+# Fat_bac
+```{r}
+Group="Fat"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(Defatted    =2, FullFat  =1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 4
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+
+# Fat_fun
+
+```{r}
+Group="Fat"
+# 读取实验设计、和物种分类文件
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+# 物种分类文件，由usearch10 -sintax_summary生成，详见扩增子分析流程系列
+# 本研究以科水平进行训练，其实各层面都可以，具体那个层面最优，需要逐个测试寻找。推荐纲、科、属；不建议用OTU，差异过大
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+# 筛选北京样品作为训练集
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+# 筛选OTU
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+## 随机森林分类
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 100, classwt = c(Defatted    =10, FullFat  =1))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+# Call:
+#  randomForest(x = otutab_t, y = design_sub$Location, ntree = 1000,      importance = TRUE, proximity = TRUE) 
+#                Type of random forest: classification
+#                      Number of trees: 1000
+# No. of variables tried at each split: 10
+# 
+#         OOB estimate of  error rate: 0.94%
+# Confusion matrix:
+#          Jiangmen Korea Shandong Sichuan class.error
+# Jiangmen       38     0        0       0       0.000
+# Korea           1    39        0       0       0.025
+# Shandong        0     0        8       0       0.000
+# Sichuan         0     0        0      20       0.000
+
+## 导出feature重要性
+
+# 根据验证验证，预览和保存feature贡献度
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+
+## 交叉验证选择Features
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+### a1. Cross validation 交叉验证选择Features
+
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# 根据 allerr err.mean 最小值取 num
+optimal = 5
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  #  geom_hline(yintercept = min(allerr$err.mean), colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) + # , max(allerr$num)
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+### a2. Features barplot with taxonomy in Family ggplot2美化feature贡献度
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+## ROC
+## --- 使用 ggplot2 绘制投稿级 ROC 曲线 ---
+# 1. 计算所有 Location 的 ROC 对象并存入列表
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. 使用 ggroc 转换为 ggplot 对象
+# 将列表传给 ggroc，会自动根据列表名生成图例
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) + # legacy.axes=T 使横轴显示为 1-Specificity
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + # 绘制对角线
+  
+  # 3. 美化配色：使用 NPG (Nature Publishing Group) 风格配色
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. 设置坐标轴和标签
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. 期刊级主题定制
+  theme_bw() + # 白色背景，有边框
+  theme(
+    panel.grid.major = element_blank(), # 去掉主网格线
+    panel.grid.minor = element_blank(), # 去掉次网格线
+    axis.title = element_text(size = 12, face = "bold", color = "black"), # 坐标轴标题
+    axis.text = element_text(size = 10, color = "black"), # 坐标轴刻度
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25), # 图例放在右下角内部
+    legend.background = element_rect(fill = alpha("white", 0.5)), # 图例半透明背景
+    aspect.ratio = 1 # 保持图形正方形，符合 ROC 规范
+  )
+
+# 显示图像
+print(p)
+
+# 6. 按照 Food Research International 的投稿要求导出
+# 通常要求 TIFF (300-600 DPI) 或 PDF
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+## 另一地点独立验证
+
+# 如果第一地点数据量足够大，可以取出1/2到1/3进行同一地点的独立验证。方法相同。
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# 转置，并添加分组信息
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# 基于训练集随机森林模型验证
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+#           predicted
+# observed   Jiangmen Korea Shandong Sichuan
+#   Jiangmen       20     0        0       0
+#   Korea           0    22        0       0
+#   Shandong        0     0        4       0
+#   Sichuan         2     0        0       8
+
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. 打印完整评估结果
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+# Overall Statistics
+#                                           
+#                Accuracy : 0.9643          
+#                  95% CI : (0.8769, 0.9956)
+#     No Information Rate : 0.3929          
+#     P-Value [Acc > NIR] : < 2.2e-16       
+#                                           
+#                   Kappa : 0.9471  
+
+# 可视化验证结果
+
+# 整理样本原始分组和预测分类
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# 保存预测结果表
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```

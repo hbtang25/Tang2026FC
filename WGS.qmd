@@ -1,0 +1,568 @@
+---
+title: "WGS pipeline"
+author: "Hong-biao Tang"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    toc-location: right
+    toc-expand: true
+    number-sections: true
+    self-contained: true
+    highlight: tango
+    code-fold: true
+    code-tools: true
+    
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
+    output: true
+    collapse: false
+    fig-show: asis
+    fig-align: center
+---
+
+# Load packages Load packages
+```{r}
+library(pacman)
+p_load(cols4all, ggplot2, dplyr, patchwork, tidyverse, scales, broomstringr, ggforce)
+
+```
+
+# Overview of functional annotations
+```{r}
+# Set variables
+input <- "result/07_humann2/KEGG_L1_L2.txt"
+group <- "All"
+top <- 50
+
+# Read files Read files
+dt <- read.table(input, header = T, sep = "\t")
+
+dt_ord <- head(dt[order(dt[,group],decreasing = TRUE),], top)
+
+dt_ord <- distinct(dt_ord, dt_ord[,2], .keep_all = T)
+
+
+dt_ord <- dt_ord[order(dt_ord[,1],decreasing = TRUE),]
+
+dt_ord[,2] <- factor(dt_ord[,2], levels = rev(dt_ord[,2]))
+dt_ord[,1] <- factor(dt_ord[,1], levels = unique(dt_ord[,1]))
+
+mycol <- c4a('bold',length(unique(dt_ord[,1])))
+
+colnames(dt_ord) <- c("Pathway_L1", "Pathway_L2", "group")
+
+
+# Generate a basic bar plot
+p <- ggplot() +
+  geom_bar(data = dt_ord,
+           aes(x = scale(group), y = Pathway_L2, fill = Pathway_L1),
+           stat = "identity") + xlab("count") +
+  theme_bw() +
+  theme(panel.grid = element_blank()) + scale_fill_manual(values = mycol)
+
+# Save the figure
+filename = paste0("result/07_humann2/", group,  "_kegg_L1_L2_top", top, ".pdf")
+ggsave(filename, p, width = 10, height = 10)
+
+```
+
+
+# Differential metabolic pathways
+## Comparison group A
+```{r}
+# Set group names
+Group_1 <- "Jiangmen"
+Group_2 <- "Zhongshan"
+Group <- "Location"
+top <- 10
+# ---------------------------------------------------------
+# Step 1: Read data
+# ---------------------------------------------------------
+pathways <- read.table("result/07_humann2/KEGG.Pathway.raw.txt", header = TRUE, sep = "\t", check.names = FALSE, stringsAsFactors = FALSE)
+# metadata grouping information
+metadata <- read.table("result/metadata.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+if (Group != "Group") {
+  if ("Group" %in% names(metadata)) {
+    metadata$Group <- NULL 
+  }
+  names(metadata)[names(metadata) == Group] <- "Group"
+}
+
+
+# Filter data for the comparison groups
+pathways_sel <- select(pathways,Pathway,filter(metadata, Group %in% c(Group_1, Group_2) )[[1]])
+
+# ---------------------------------------------------------
+# Step 2: Data preparation and statistical analysis
+# ---------------------------------------------------------
+df <- pathways_sel %>%
+  pivot_longer(cols = -Pathway, names_to = "SampleID", values_to = "Abundance") %>%
+  left_join(metadata, by = "SampleID") %>%
+  mutate(Group = factor(Group, levels = c(Group_1, Group_2)))
+
+# Calculate the mean and standard error for each group (for plotting the left-hand bar plot)
+bar_data <- df %>%
+  group_by(Pathway, Group) %>%
+  summarise(
+    Mean = mean(Abundance),
+    SE = sd(Abundance) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Use Welch's t-test to calculate the difference in means (Difference in mean) and 95% confidence intervals (for plotting the right-hand dot plot)
+diff_data_all <- df %>%
+  group_by(Pathway) %>%
+  summarise(
+    test_res = list(t.test(Abundance ~ Group)), 
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_value = map_dbl(test_res, ~.$p.value),
+    diff_mean = map_dbl(test_res, ~.$estimate[1] - .$estimate[2]),
+    conf_low = map_dbl(test_res, ~.$conf.int[1]),
+    conf_high = map_dbl(test_res, ~.$conf.int[2])
+  ) %>%
+  select(-test_res) %>% 
+  arrange(p_value)
+
+
+write.table(diff_data_all, file = paste0("result/07_humann2/", Group_1, " vs ", Group_2,  "_KEGG_Differential_Analysis_Results.csv"), row.names = FALSE, sep = "\t", quote = F)
+
+# Sort p-values in ascending order and select significantly different pathways
+top_pathways <- diff_data_all %>%
+  arrange(p_value) %>%
+  head(top) %>%
+  pull(Pathway)
+
+# Filter the data and set factor levels according to the sorted order to ensure consistent y-axis ordering across plots
+bar_data <- bar_data %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(Pathway = factor(Pathway, levels = rev(top_pathways)))
+
+diff_data <- diff_data_all %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(
+    Pathway = factor(Pathway, levels = rev(top_pathways)),
+    ColorGroup = ifelse(diff_mean > 0, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+  )
+
+# ---------------------------------------------------------
+# Step 3: Construct visualization plots (with alternating gray backgrounds)
+# ---------------------------------------------------------
+my_colors <- setNames(
+  c("#5086AB", "#F19454", "#5086AB", "#F19454"),
+  c(Group_1, Group_2, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+)
+
+# 1. Create a data frame for plotting alternating gray backgrounds
+num_pathways <- length(top_pathways)
+
+# Generate coordinates for background rectangles: create a rectangle with a height of 1 for every other row
+bg_data <- data.frame(
+  xmin = seq(1, num_pathways, by = 2) - 0.5,
+  xmax = seq(1, num_pathways, by = 2) + 0.5,
+  ymin = -Inf,
+  ymax = Inf
+)
+
+# Plot 1: Left-hand bar plot (Mean Abundance)
+p1 <- ggplot(bar_data, aes(x = Pathway, y = Mean, fill = Group)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_bar(stat = "identity", 
+           position = position_dodge(width = 0.7), 
+           width = 0.7,
+           linewidth = 0.4,
+           color = "black") +
+  geom_linerange(aes(ymin = Mean - SE, ymax = Mean + SE),
+                 position = position_dodge(width = 0.7), 
+                 color = "black", 
+                 linewidth = 0.4) +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8, color = "black"),
+    axis.text.x = element_text(size = 6, color = "black"),
+    axis.line.x = element_line(linewidth = 0.4, color = "black"),
+    axis.line.y = element_line(linewidth = 0.4, color = "black"),
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.key.width = unit(0.8, "cm"),   
+    legend.key.height = unit(0.25, "cm"), 
+    legend.text = element_text(size = 8)  
+  ) +
+  labs(y = "Mean Abundance")
+
+# Plot 2: Right-hand difference dot plot (Difference in mean abundance)
+p2 <- ggplot(diff_data, aes(x = Pathway, y = diff_mean)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.4, linewidth = 0.4) +
+  geom_point(aes(fill = ColorGroup), shape = 21, size = 3, color = "black") +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),     
+    axis.ticks.y = element_blank(),    
+    axis.line.x = element_line(linewidth = 0.4, color = "black"),
+    axis.line.y = element_blank(),     
+    axis.text.x = element_text(size = 6, color = "black"),
+    legend.position = "none"           
+  ) +
+  labs(y = "Difference in mean abundance")
+
+# Combine the plots
+final_plot <- p1 + p2 + plot_layout(widths = c(2, 1))
+
+# Export as a high-resolution figure
+ggsave(paste0("result/07_humann2/", Group_1, " vs ", Group_2, "_STAMP_plot_KEGG.pdf"), plot = final_plot, width = 7, height = 5, dpi = 300)
+
+```
+
+
+## Comparison group B
+
+```{r}
+Group_1 <- "Jiangmen"
+Group_2 <- "Sichuan"
+Group <- "Location"
+top <- 10
+
+pathways <- read.table("result/07_humann2/KEGG.Pathway.raw.txt", header = TRUE, sep = "\t", check.names = FALSE, stringsAsFactors = FALSE)
+
+metadata <- read.table("result/metadata.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+
+if (Group != "Group") {
+  if ("Group" %in% names(metadata)) {
+    metadata$Group <- NULL 
+  }
+  names(metadata)[names(metadata) == Group] <- "Group"
+}
+
+
+pathways_sel <- select(pathways,Pathway,filter(metadata, Group %in% c(Group_1, Group_2) )[[1]])
+
+df <- pathways_sel %>%
+  pivot_longer(cols = -Pathway, names_to = "SampleID", values_to = "Abundance") %>%
+  left_join(metadata, by = "SampleID") %>%
+  mutate(Group = factor(Group, levels = c(Group_1, Group_2)))
+
+bar_data <- df %>%
+  group_by(Pathway, Group) %>%
+  summarise(
+    Mean = mean(Abundance),
+    SE = sd(Abundance) / sqrt(n()),
+    .groups = "drop"
+  )
+
+diff_data_all <- df %>%
+  group_by(Pathway) %>%
+  summarise(
+    test_res = list(t.test(Abundance ~ Group)), 
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_value = map_dbl(test_res, ~.$p.value),
+    diff_mean = map_dbl(test_res, ~.$estimate[1] - .$estimate[2]),
+    conf_low = map_dbl(test_res, ~.$conf.int[1]),
+    conf_high = map_dbl(test_res, ~.$conf.int[2])
+  ) %>%
+  select(-test_res) %>% 
+  arrange(p_value)
+
+
+write.table(diff_data_all, file = paste0("result/07_humann2/", Group_1, " vs ", Group_2,  "_KEGG_Differential_Analysis_Results.csv"), row.names = FALSE, sep = "\t", quote = F)
+
+top_pathways <- diff_data_all %>%
+  arrange(p_value) %>%
+  head(top) %>%
+  pull(Pathway)
+
+bar_data <- bar_data %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(Pathway = factor(Pathway, levels = rev(top_pathways)))
+
+diff_data <- diff_data_all %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(
+    Pathway = factor(Pathway, levels = rev(top_pathways)),
+    ColorGroup = ifelse(diff_mean > 0, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+  )
+my_colors <- setNames(
+  c("#5086AB", "#5B9C61", "#5086AB", "#5B9C61"),
+  c(Group_1, Group_2, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+)
+
+num_pathways <- length(top_pathways)
+
+bg_data <- data.frame(
+  xmin = seq(1, num_pathways, by = 2) - 0.5,
+  xmax = seq(1, num_pathways, by = 2) + 0.5,
+  ymin = -Inf,
+  ymax = Inf
+)
+
+p1 <- ggplot(bar_data, aes(x = Pathway, y = Mean, fill = Group)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_bar(stat = "identity", 
+           position = position_dodge(width = 0.7), 
+           width = 0.7,
+           linewidth = 0.4,
+           color = "black") +
+  geom_linerange(aes(ymin = Mean - SE, ymax = Mean + SE),
+                 position = position_dodge(width = 0.7), 
+                 color = "black", 
+                 linewidth = 0.4) +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8, color = "black"),
+    axis.text.x = element_text(size = 6, color = "black"),
+    axis.line.x = element_line(linewidth = 0.4, color = "black"),
+    axis.line.y = element_line(linewidth = 0.4, color = "black"),
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.key.width = unit(0.8, "cm"),   
+    legend.key.height = unit(0.25, "cm"), 
+    legend.text = element_text(size = 8)  
+  ) +
+  labs(y = "Mean Abundance")
+
+# Plot 2: Right-hand difference dot plot (Difference in mean abundance)
+p2 <- ggplot(diff_data, aes(x = Pathway, y = diff_mean)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.4, linewidth = 0.4) +
+  geom_point(aes(fill = ColorGroup), shape = 21, size = 3, color = "black") +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),     
+    axis.ticks.y = element_blank(),    
+    axis.line.x = element_line(linewidth = 0.4, color = "black"),
+    axis.line.y = element_blank(),     
+    axis.text.x = element_text(size = 6, color = "black"),
+    legend.position = "none"           
+  ) +
+  labs(y = "Difference in mean abundance")
+
+final_plot <- p1 + p2 + plot_layout(widths = c(2, 1))
+
+ggsave(paste0("result/07_humann2/", Group_1, " vs ", Group_2, "_STAMP_plot_KEGG.pdf"), plot = final_plot, width = 7, height = 5, dpi = 300)
+```
+
+## Comparison group C
+
+```{r}
+Group_1 <- "Zhongshan"
+Group_2 <- "Sichuan"
+Group <- "Location"
+top <- 10
+
+pathways <- read.table("result/07_humann2/KEGG.Pathway.raw.txt", header = TRUE, sep = "\t", check.names = FALSE, stringsAsFactors = FALSE)
+
+metadata <- read.table("result/metadata.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+if (Group != "Group") {
+  if ("Group" %in% names(metadata)) {
+    metadata$Group <- NULL 
+  }
+  names(metadata)[names(metadata) == Group] <- "Group"
+}
+
+
+pathways_sel <- select(pathways,Pathway,filter(metadata, Group %in% c(Group_1, Group_2) )[[1]])
+
+df <- pathways_sel %>%
+  pivot_longer(cols = -Pathway, names_to = "SampleID", values_to = "Abundance") %>%
+  left_join(metadata, by = "SampleID") %>%
+  mutate(Group = factor(Group, levels = c(Group_1, Group_2)))
+
+bar_data <- df %>%
+  group_by(Pathway, Group) %>%
+  summarise(
+    Mean = mean(Abundance),
+    SE = sd(Abundance) / sqrt(n()),
+    .groups = "drop"
+  )
+
+diff_data_all <- df %>%
+  group_by(Pathway) %>%
+  summarise(
+    test_res = list(t.test(Abundance ~ Group)), 
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_value = map_dbl(test_res, ~.$p.value),
+    diff_mean = map_dbl(test_res, ~.$estimate[1] - .$estimate[2]),
+    conf_low = map_dbl(test_res, ~.$conf.int[1]),
+    conf_high = map_dbl(test_res, ~.$conf.int[2])
+  ) %>%
+  select(-test_res) %>% 
+  arrange(p_value)
+
+
+write.table(diff_data_all, file = paste0("result/07_humann2/", Group_1, " vs ", Group_2,  "_KEGG_Differential_Analysis_Results.csv"), row.names = FALSE, sep = "\t", quote = F)
+
+top_pathways <- diff_data_all %>%
+  arrange(p_value) %>%
+  head(top) %>%
+  pull(Pathway)
+
+bar_data <- bar_data %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(Pathway = factor(Pathway, levels = rev(top_pathways)))
+
+diff_data <- diff_data_all %>% 
+  filter(Pathway %in% top_pathways) %>%
+  mutate(
+    Pathway = factor(Pathway, levels = rev(top_pathways)),
+    ColorGroup = ifelse(diff_mean > 0, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+  )
+
+my_colors <- setNames(
+  c("#F19454", "#5B9C61", "#F19454", "#5B9C61"),
+  c(Group_1, Group_2, paste0(Group_1, "_higher"), paste0(Group_2, "_higher"))
+)
+
+num_pathways <- length(top_pathways)
+
+bg_data <- data.frame(
+  xmin = seq(1, num_pathways, by = 2) - 0.5,
+  xmax = seq(1, num_pathways, by = 2) + 0.5,
+  ymin = -Inf,
+  ymax = Inf
+)
+
+p1 <- ggplot(bar_data, aes(x = Pathway, y = Mean, fill = Group)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_bar(stat = "identity", 
+           position = position_dodge(width = 0.7), 
+           width = 0.7, 
+           color = "black") +
+  geom_linerange(aes(ymin = Mean - SE, ymax = Mean + SE),
+                 position = position_dodge(width = 0.7), 
+                 color = "black", 
+                 linewidth = 0.8) +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8, color = "black"),
+    axis.text.x = element_text(size = 6, color = "black"),
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.key.width = unit(0.8, "cm"),   
+    legend.key.height = unit(0.25, "cm"), 
+    legend.text = element_text(size = 8)  
+  ) +
+  labs(y = "Mean Abundance")
+
+p2 <- ggplot(diff_data, aes(x = Pathway, y = diff_mean)) +
+  geom_rect(data = bg_data, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "#E5E5E5", inherit.aes = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.4, linewidth = 0.8) +
+  geom_point(aes(fill = ColorGroup), shape = 21, size = 3, color = "black") +
+  scale_y_continuous(labels = label_scientific()) +
+  coord_flip() +
+  scale_fill_manual(values = my_colors) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 8),
+    axis.title.y = element_blank(),
+    axis.text.y = element_blank(),     
+    axis.ticks.y = element_blank(),    
+    axis.line.x = element_line(linewidth = 0.4, color = "black"),
+    axis.line.y = element_blank(),     
+    axis.text.x = element_text(size = 6, color = "black"),
+    legend.position = "none"           
+  ) +
+  labs(y = "Difference in mean abundance")
+
+final_plot <- p1 + p2 + plot_layout(widths = c(2, 1))
+
+ggsave(paste0("result/07_humann2/", Group_1, " vs ", Group_2, "_STAMP_plot_KEGG.pdf"), plot = final_plot, width = 7, height = 5, dpi = 300)
+```
+
+
+
+# humann2_pie
+```{r}
+# 1. Prepare data
+raw_data <- read.delim("result/07_humann2/Enzyme_Contribution_pie.txt", header=TRUE)
+
+# 2. Data cleaning and parsing
+plot_data <- raw_data %>%
+  # Split the species contribution strings
+  mutate(Contribution = str_split(Contribution, ",\\s*")) %>%
+  unnest(Contribution) %>%
+  # Extract species names and numerical values
+  extract(Contribution, into = c("Species", "Value"), regex = "(.*)\\((.*)\\)", convert = TRUE) %>%
+  group_by(Enzyme, Abundance) %>%
+  # Calculate the value of the "Others" category to ensure complete pie charts
+  mutate(Known_Sum = sum(Value)) %>%
+  group_modify(~ add_row(.x, Species = "Others", Value = max(0, .y$Abundance - .x$Known_Sum[1]))) %>%
+  filter(Value > 0) %>% 
+  ungroup()
+
+# 3. Calculate the angular positions of the pie chart segments in radians
+plot_data <- plot_data %>%
+  group_by(Enzyme) %>%
+  mutate(
+    focus = 0,
+    end_angle = cumsum(Value) / Abundance * 2 * pi,
+    start_angle = lag(end_angle, default = 0),
+    # Set the radius based on the square root of the abundance index to ensure that the area is proportional to abundance
+    radius = sqrt(Abundance) / 50 
+  ) %>%
+  ungroup()
+
+# 4. Plotting
+g <- ggplot(plot_data) +
+  geom_arc_bar(aes(x0 = 0, y0 = 0, r0 = 0, r = radius,
+                   start = start_angle, end = end_angle, fill = Species),
+               color = "white", size = 0.001) +
+  facet_wrap(~ Enzyme, ncol = 12) + # Arrange in 6 columns; adjust as needed
+  coord_fixed() +
+  theme_void() +
+  theme(
+    strip.text = element_text(size = 8, face = "italic"),
+    legend.position = "bottom",
+    plot.margin = margin(10, 10, 10, 10)
+  ) +
+  labs(title = "Enzyme Abundance and Microbial Contribution",
+       fill = "Microbial Species") +
+  scale_fill_viridis_d(option = "plasma") # Use a high-contrast color palette
+
+g
+ggsave("result/07_humann2/enzyme_pies.pdf", g, width = 48, height = 40, limitsize = FALSE)
+```

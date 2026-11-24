@@ -1,0 +1,72 @@
+---
+title: "Volcano"
+author: "Hong-biao Tang"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    toc-location: right
+    toc-expand: true
+    number-sections: true
+    self-contained: true
+    highlight: tango
+    code-fold: true
+    code-tools: true
+    
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
+    output: true
+    collapse: false
+    fig-show: asis
+    fig-align: center
+---
+
+# Loading R package
+```{r}
+library(pacman)
+p_load(ggplot2, ggrepel)
+```
+
+
+```{r}
+# Setting group
+Group_1 <- "Jiangmen"
+Group_2 <- "Zhongshan"
+
+# Read file
+res.df <- read.table(file = paste0(Group_1, "-", Group_2, ".txt"), sep = "\t", header = T, row.names = 1)
+
+# Acquiring Up- and Down-Regulated Genes
+deg.up <- res.df[res.df$level == "Enriched", ]
+deg.down <-  res.df[res.df$level == "Depleted", ]
+
+# Customize differential type labeling based on |log2FC| >= 1 and adj.P.Val < 0.01
+p <- ggplot(res.df, aes(x = log2FC, y = -log10(PValue), color = level)) +
+geom_point(alpha = 0.6, size = 2) +
+scale_colour_manual(values  = c('#D186B6', '#5086AB', 'gray'), limits = c('Enriched', 'Depleted', 'NotSig')) +
+theme(panel.grid = element_blank(), panel.background = element_rect(color = '#584B48', fill = 'transparent'), plot.title = element_text(hjust = 0.5, size = 18), axis.title.x = element_text(color = "#584B48", size = 10),
+  axis.text.y = element_text(color = "#584B48", size = 10), axis.title.y = element_text(color = "#584B48", size = 14),
+  axis.text.x = element_text(color = "#584B48", size = 14)) +
+theme(legend.key = element_rect(fill = 'transparent', color = NA), legend.background = element_rect(fill = 'transparent'), legend.position = "right", legend.title = element_text(color="white"), legend.text = element_text(color="#584B48", size = 10),) +
+geom_hline(yintercept = -log(0.05, 10), color = 'gray', size = 0.3) +
+xlim(-25, 25) + ylim(0, 4) +
+labs(x = '\nLog2 Fold Change', y = '-log10(padj)\n', color = '#584B48', title = paste0(Group_1, " vs ", Group_2)) +
+  annotate("text", label = paste("Enriched Species is ", dim(deg.up)[1], "\nDepleted Species is",  dim(deg.down)[1]), x = -0, y = 4, size = 4, colour = "#584B48")
+
+ 
+up <- deg.up[order(deg.up$PValue), ][1:4, ]
+down <- deg.down[order(deg.down$PValue), ][1:6, ]
+ 
+# Using functions from the ggrepel package
+p1 <- p + 
+geom_text_repel(data = rbind(up, down), aes(label = rownames(rbind(up, down))), fontface = "italic", size = 4, show.legend = F)
+p1
+ggsave(paste0(Group_1, " vs ", Group_2, " vol.pdf") ,p1, width=7, height=10)
+
+```
+

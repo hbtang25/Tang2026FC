@@ -1,0 +1,252 @@
+---
+title: "Tree Diagram"
+author: "Hong-biao Tang"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    toc-location: right
+    toc-expand: true
+    number-sections: true
+    self-contained: true
+    highlight: tango
+    code-fold: true
+    code-tools: true
+    
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
+    output: true
+    collapse: false
+    fig-show: asis
+    fig-align: center
+---
+
+
+# GraphLan Visualization
+## bac
+```{r}
+# Parameter settings
+# Filter by abundance
+abundance = 0.1
+# Filter by number
+number = 300
+
+# Read input files
+otutab = read.table("otutab_bac.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+taxonomy = read.table("taxonomy_bac.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+
+
+# Data filtering
+# Normalize and calculate the mean
+norm = as.data.frame(t(t(otutab)/colSums(otutab,na=T)*100))
+# Sort abundance in descending order
+idx = order(rowMeans(norm), decreasing = T)
+norm = norm[idx,]
+
+# Filter by abundance
+idx = rowMeans(norm) > abundance
+filtered_otutab = norm[idx,]
+
+# Filter by number
+filtered_otutab = head(filtered_otutab, number)
+# Add mean values and retain 4 decimal places
+filtered_otutab = round(cbind(rowMeans(filtered_otutab), filtered_otutab), digits = 4)
+colnames(filtered_otutab)[1] = "Mean"
+# Filter the corresponding taxonomic annotations
+idx = rownames(filtered_otutab) %in% rownames(taxonomy)
+filtered_otutab = filtered_otutab[idx,]
+filtered_taxonomy = taxonomy[rownames(filtered_otutab),]
+
+# Save output files
+# Filtered OTU table
+write.table("OTUID\t", file="filtered_otutab_bac.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_otutab, file="filtered_otutab_bac.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+# Filtered taxonomic annotations
+write.table("OTUID\t", file="filtered_taxonomy_bac.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_taxonomy, file="filtered_taxonomy_bac.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+
+### Construct the tree backbone
+# Read the filtered file without specifying row names
+tax = read.table("filtered_taxonomy_bac.txt", sep="\t", header = TRUE, stringsAsFactors = F)
+# Select five taxonomic ranks from phylum to genus plus OTUID
+tree = data.frame(tax[,c(3:7,1)], stringsAsFactors = F)
+# head(tree)
+## clarify taxonomy, resolve duplicate names across taxonomic ranks, make the ranks identifiable, and maintain consistency with the Greengene format
+tree[,1] = paste("p__",tree[,1],sep = "")
+tree[,2] = paste("c__",tree[,2],sep = "")
+tree[,3] = paste("o__",tree[,3],sep = "")
+tree[,4] = paste("f__",tree[,4],sep = "")
+# tree[,5] = paste("g__",tree[,5],sep = "")
+# save tree backbone, in dot-separated format
+
+# Resolve duplicate family labels
+idx = tree[,5] %in% "Unassigned"
+# Method 1. Add numerical identifiers to duplicate labels, but this results in too many Unassigned entries
+# tree[idx,4] = paste0(tree[idx,4], 1:length(tree[idx,4]))
+# Method 2. Remove entries without family-level annotations, reducing the number of entries but improving the visual appearance
+tree = tree[!idx,]
+# Simplify irregular family names containing underscores
+# tree[,5] = gsub('_\\w*',"",tree[,5])
+write.table (tree, file="tree1_backbone_bac.txt", sep=".", col.names=F, row.names=F, quote=F)
+
+# List the existing phyla, classes, orders, families, and genera to assign phylum-specific background colors
+Phylum_bac = unique(tree[,1]) 
+Class_bac = unique(tree[,2])
+Order_bac = unique(tree[,3])
+Family_bac = unique(tree[,4])
+Genus_bac = unique(tree[,5])
+
+# Select families from the four major bacterial phyla and color them by phylum
+# To change the taxonomic rank to order, replace column 4 of tree with column 3 and Family with Order
+lac = tree[tree[,3]=="o__Lactobacillales",5] 
+ent = tree[tree[,3]=="o__Enterobacteriales",5]
+bat = tree[tree[,3]=="o__Bacteroidales",5]
+bac = tree[tree[,3]=="o__Bacillales",5]
+act = tree[tree[,3]=="o__Actinomycetales",5]
+nei = tree[tree[,3]=="o__Neisseriales",5]
+pse = tree[tree[,3]=="o__Pseudomonadales",5]
+
+# Assign labels, rotate text, and annotate background colors by phylum for each family
+# Other taxonomic ranks can also be used, such as Order, Class, or Genus
+label_color = data.frame(stringsAsFactors = F)
+for (element in Genus_bac)
+{
+  # element
+  anno = data.frame(stringsAsFactors = F)
+  anno[1,1] = element
+  anno[1,2] = "annotation"
+  anno[1,3] = "*"
+  # Set text rotation to 90 degrees
+  anno[2,1] = element
+  anno[2,2] = "annotation_rotation"
+  anno[2,3] = "90"
+  # Set background colors, assigning a distinct color to each of the four major phyla and grey to the others
+  anno[3,1] = element
+  anno[3,2] = "annotation_background_color" 
+  
+  
+  # background-image: linear-gradient(to right top, #d16ba5, #c777b9, #ba83ca, #aa8fd8, #9a9ae1, #80a8ef, #60b5f6, #39c1f8, #00d2f3, #00e0df, #35ebc0, #85f29b);
+                                    
+  if (element %in% lac)
+  {
+      anno[3,3] = "#85F29B"
+  } else if (element %in% ent)
+  {
+      anno[3,3] = "#F58D8D"   
+  } else if (element %in% bat)
+  {
+      anno[3,3] = "#F7C875"  
+  } else if (element %in% bac)
+  {
+      anno[3,3] = "#91DBF6"   
+  } else if (element %in% act)
+  {
+      anno[3,3] = "#898FB2"   
+  } else if (element %in% nei)
+  {
+  anno[3,3] = "#9FAFA1"
+  } else if (element %in% pse)
+  {
+  anno[3,3] = "#AAAE8A"
+  } else {
+      anno[3,3] = "grey"   
+  }
+  label_color = rbind(label_color,anno)
+}
+write.table(label_color, "tree2_label_color_bac.txt", sep = "\t", quote = F,col.names = F,row.names = F, na="")
+```
+
+
+## fun
+
+```{r}
+abundance = 0.1
+number = 300
+
+otutab = read.table("otutab_fun.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+taxonomy = read.table("taxonomy_fun.txt", sep="\t", header = TRUE, row.names = 1, stringsAsFactors = F, comment.char = "")
+
+norm = as.data.frame(t(t(otutab)/colSums(otutab,na=T)*100))
+idx = order(rowMeans(norm), decreasing = T)
+norm = norm[idx,]
+
+idx = rowMeans(norm) > abundance
+filtered_otutab = norm[idx,]
+
+filtered_otutab = round(cbind(rowMeans(filtered_otutab), filtered_otutab), digits = 4)
+colnames(filtered_otutab)[1] = "Mean"
+idx = rownames(filtered_otutab) %in% rownames(taxonomy)
+filtered_otutab = filtered_otutab[idx,]
+filtered_taxonomy = taxonomy[rownames(filtered_otutab),]
+
+write.table("OTUID\t", file="filtered_otutab_fun.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_otutab, file="filtered_otutab_fun.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+write.table("OTUID\t", file="filtered_taxonomy_fun.txt", append = F, sep="\t", quote=F, eol = "", row.names=F, col.names=F)
+suppressWarnings(write.table(filtered_taxonomy, file="filtered_taxonomy_fun.txt", append = T, sep="\t", quote=F, row.names=T, col.names=T))
+
+
+tax = read.table("filtered_taxonomy_fun.txt", sep="\t", header = TRUE, stringsAsFactors = F)
+tree = data.frame(tax[,c(3:7,1)], stringsAsFactors = F)
+tree[,1] = paste("p__",tree[,1],sep = "")
+tree[,2] = paste("c__",tree[,2],sep = "")
+tree[,3] = paste("o__",tree[,3],sep = "")
+tree[,4] = paste("f__",tree[,4],sep = "")
+
+idx = tree[,5] %in% "Unassigned"
+tree[,5] = gsub('_\\w*',"",tree[,5])
+write.table (tree, file="tree1_backbone_fun.txt", sep=".", col.names=F, row.names=F, quote=F)
+
+Phylum_fun = unique(tree[,1]) 
+Class_fun = unique(tree[,2])
+Order_fun = unique(tree[,3])
+Family_fun = unique(tree[,4])
+Genus_fun = unique(tree[,5])
+
+eur = tree[tree[,3]=="o__Eurotiales",5]
+sac = tree[tree[,3]=="o__Saccharomycetales",5] 
+ple = tree[tree[,3]=="o__Pleosporales",5]
+hyp = tree[tree[,3]=="o__Hypocreales",5]
+tri = tree[tree[,3]=="o__Trichosporonales",5]
+
+label_color = data.frame(stringsAsFactors = F)
+for (element in Genus_fun)
+{
+  anno = data.frame(stringsAsFactors = F)
+  anno[1,1] = element
+  anno[1,2] = "annotation"
+  anno[1,3] = "*"
+  anno[2,1] = element
+  anno[2,2] = "annotation_rotation"
+  anno[2,3] = "90"
+  anno[3,1] = element
+  anno[3,2] = "annotation_background_color" 
+  
+  
+  if (element %in% eur)
+  {
+      anno[3,3] = "#85F29B"
+  } else if (element %in% sac)
+  {
+      anno[3,3] = "#F58D8D"   
+  } else if (element %in% ple)
+  {
+      anno[3,3] = "#F7C875"  
+  } else if (element %in% hyp)
+  {
+      anno[3,3] = "#91DBF6"   
+  } else if (element %in% tri)
+  {
+      anno[3,3] = "#898FB2"
+
+  } else {
+      anno[3,3] = "grey"   
+  }
+  label_color = rbind(label_color,anno)
+}
+write.table(label_color, "tree2_label_color_fun.txt", sep = "\t", quote = F,col.names = F,row.names = F, na="")
+```

@@ -1,0 +1,53 @@
+---
+title: "Heatmap"
+author: "Hong-biao Tang"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    toc-location: right
+    toc-expand: true
+    number-sections: true
+    self-contained: true
+    highlight: tango
+    code-fold: true
+    code-tools: true
+    
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
+    output: true
+    collapse: false
+    fig-show: asis
+    fig-align: center
+---
+
+# Loading R package
+```{r}
+library(pacman)
+p_load(pheatmap, dplyr)
+```
+
+
+# Read the data file
+```{r}
+df <- read.table("data/taxonomy_s_top5.tsv", header = T, row.names = 1, sep = "\t")
+metadata <- read.table("data/metadata.tsv", header = T, row.names = 1, sep = "\t")
+
+# annotation_col <- metadata
+annotation_col <- select(metadata, Location)
+ann_colors = list(
+  Location = c(Sichuan = "#1B9E77", Zhongshan = "#D95F02", Jiangmen = "#E7298A")
+)
+```
+
+```{r}
+# Drawing
+pheatmap(df, scale = "column", clustering_method = "complete", clustering_distance_rows = "correlation", cutree_cols = 6, border = F, treeheight_row = 30, treeheight_col = 30, fontsize_row = 7, fontsize_col = 6, angle_col = 45, fontsize = 8, cellheight = 10, annotation_col = annotation_col, annotation_colors = ann_colors, color = colorRampPalette(c("#6890B5", "white", "#B64141"))(100), width = 12, height = 8, filename="taxonomy_s_top5.pdf")
+
+```
+

@@ -1,0 +1,379 @@
+---
+title: "Random Forest Classification"
+author: "Hong-biao Tang"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+    toc-location: right
+    toc-expand: true
+    number-sections: true
+    self-contained: true
+    highlight: tango
+    code-fold: true
+    code-tools: true
+    
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
+    output: true
+    collapse: false
+    fig-show: asis
+    fig-align: center
+---
+
+
+
+# Loading the relevant R packages
+
+```{r}
+# Loading the relevant R packages:
+library(pacman)
+p_load(randomForest, ggplot2, pheatmap, pROC, ggsci, caret)
+source("scripts/stat_plot_functions.R")
+```
+
+# Location_bac
+```{r}
+Group="Location"
+# Read the experimental design and taxonomic classification files
+design = read.table("metadata_bac.tsv",header = T, row.names = 1, sep = "\t")
+otu_table =read.table("sum_g_bac.txt",header = T, row.names = 1, sep = "\t")
+
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+
+# Filter OTUs
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+# Random forest classification
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000)
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_bac.txt"))
+
+
+# Export feature importance
+# Preview and save feature contributions based on the validation results
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_bac.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+# Add family annotation
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_bac.txt tax_imp_bac.txt | sed '1 s/$/Order/' > tax_imp_order_bac.txt")
+
+
+
+# Feature selection through cross-validation
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+# result$n.var
+# length(result$n.var)
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+# a1. Cross validation for feature selection
+# ggplot2 visualize result of cross validation
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+# number of features selected
+# Select the num corresponding to the minimum err.mean in allerr
+optimal = 61
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_bac.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) +
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_bac.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+# a2. Features barplot with taxonomy in Family ggplot2 visualization and styling of feature contributions
+imp = read.table("tax_imp_order_bac.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_bac_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+# ROC
+# --- Generate publication-quality ROC curves using ggplot2 ---
+# 1. Calculate ROC objects for all Location classes and store them in a list
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+# 2. Convert to a ggplot object using ggroc
+# Pass the list to ggroc to automatically generate legend labels based on the list names
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + 
+  
+  # 3. Enhance the color scheme using the NPG (Nature Publishing Group) color palette
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  # 4. Set axes and labels
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  # 5. Customize the publication-quality theme
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(size = 12, face = "bold", color = "black"),
+    axis.text = element_text(size = 10, color = "black"),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25),
+    legend.background = element_rect(fill = alpha("white", 0.5)),
+    aspect.ratio = 1 
+  )
+
+
+# 6. Export
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_bac.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+# Independent validation
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+# Transpose the table and add grouping information
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+
+# Perform validation using the random forest model fitted to the training set
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_bac.txt"))
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+# 4. Print the complete evaluation results
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_bac.txt"))
+
+# Visualize the validation results
+# Organize the original sample groups and predicted classifications
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+# Save the prediction results table
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_bac.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_bac.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
+
+# Location_fun
+
+```{r}
+Group="Location"
+design = read.table("metadata_fun.tsv",header = T, row.names = 1, sep = "\t")
+
+otu_table =read.table("sum_g_fun.txt",header = T, row.names = 1, sep = "\t")
+
+target_col <- paste0("rf", Group)
+design_sub = design[design[[target_col]] == "Train", ]
+summary(design_sub)
+
+idx = rownames(design_sub) %in% colnames(otu_table)
+design_sub = design_sub[idx,]
+otutab_t = as.data.frame(t(otu_table[, rownames(design_sub)]))  
+design_sub[[Group]] <- factor(design_sub[[Group]])
+
+
+set.seed(325)
+rf = randomForest(otutab_t, design_sub[[Group]], importance=TRUE, proximity=TRUE, ntree = 1000, classwt = c(Jiangmen   =1, Korea  =1, Shandong =5, Sichuan =3))
+print(rf)
+capture.output(print(rf), file = paste0("rf_", Group, "_summary_fun.txt"))
+
+imp= as.data.frame(round(rf$importance,2))
+imp = imp[order(imp$MeanDecreaseAccuracy,decreasing = F),]
+write.table(imp, file = "tax_imp_fun.txt", sep = "\t", quote = F, row.names = T, col.names = T)
+
+system("awk 'NR==FNR{a[$7]=$5} NR>FNR{print $0\"\t\"a[$1]}' taxonomy_fun.txt tax_imp_fun.txt | sed '1 s/$/Order/' > tax_imp_order_fun.txt")
+
+
+n = ncol(otutab_t)-1
+myotutab_t= otutab_t[1:n]
+set.seed(325)
+result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+
+with(result, plot(n.var, error.cv, log="x", type="o", lwd=2))
+result1 = result
+
+error.cv = data.frame(num = result$n.var, error.1 =  result$error.cv)
+for (i in 316:(315+4)){
+  print(i)
+  set.seed(i)
+  result= rfcv(myotutab_t, design_sub[[Group]], cv.fold=5, scale = "log", step = 0.9)
+  error.cv = cbind(error.cv, result$error.cv)
+}
+
+
+n.var = error.cv$num
+error.cv = error.cv[,2:6]
+colnames(error.cv) = paste('err',1:5,sep='.')
+err.mean = apply(error.cv,1,mean)
+allerr = data.frame(num=n.var,err.mean=err.mean,error.cv)
+
+
+optimal = 19
+
+write.table(allerr, file =paste0("tax_rfcv_",Group,"_fun.txt", sep=""), sep = "\t", quote = F, row.names = T, col.names = T)
+
+p = ggplot() + 
+  geom_line(aes(x = allerr$num, y = allerr$err.1), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.2), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.3), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.4), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.5), colour = 'grey') + 
+  geom_line(aes(x = allerr$num, y = allerr$err.mean), colour = 'black') + 
+  geom_vline(xintercept = optimal, colour='black', lwd=0.36, linetype="dashed") + 
+  coord_trans(x = "log2") +
+  scale_x_continuous(breaks = c(2, 10, 20, 30, 50, 100, 150, 200)) +
+  labs(title=paste('Training set (n = ', dim(otutab_t)[1],')', sep = ''), 
+       x='Number of genus ', y='Cross-validation error rate') + 
+  annotate("text", x = optimal, y = max(allerr$err.mean), label=paste("optimal = ", optimal, sep="")) + 
+  coord_flip() +
+  main_theme 
+ggsave(p, file = paste0("tax_rfcv_",Group,"_fun.pdf", sep=""), width = 80, height = 89, unit = 'mm')
+p
+
+
+imp = read.table("tax_imp_order_fun.txt", header=T, row.names= 1, sep="\t") 
+imp = tail(imp, n = 10)
+imp$Genus = factor(rownames(imp), levels = rownames(imp))
+
+p = ggplot(imp, aes(x = Genus, y = MeanDecreaseAccuracy, fill = Order)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() + main_theme
+ggsave(paste0("tax_top_feautre_fun_",Group,".pdf", sep=""), p, width=89 * 1.5, height=50 * 1.5, unit='mm')
+p
+
+
+prob_mat <- rf$votes
+actual_label <- design_sub[[Group]]
+classes <- levels(actual_label)
+
+roc_list <- list()
+for (class_name in classes) {
+  roc_list[[class_name]] <- roc(actual_label == class_name, 
+                                prob_mat[, class_name], 
+                                quiet = TRUE)
+}
+
+
+p <- ggroc(roc_list, legacy.axes = TRUE, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  
+  scale_color_npg(name = Group, 
+                  labels = paste(names(roc_list), " (AUC = ", 
+                                 sapply(roc_list, function(x) sprintf("%.3f", auc(x))), ")", sep="")) +
+  
+  labs(x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       title = "ROC Curves for Random Forest Classification") +
+  
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(size = 12, face = "bold", color = "black"),
+    axis.text = element_text(size = 10, color = "black"),
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    legend.position = c(0.75, 0.25),
+    legend.background = element_rect(fill = alpha("white", 0.5)),
+    aspect.ratio = 1
+  )
+
+ggsave(paste0("ROC_Curves_FRI_Submission_",Group,"_fun.pdf", sep=""), p, width = 6, height = 5.5, units = "in", dpi = 600)
+
+
+
+design_test = design[design[[target_col]] == "Test", ]
+summary(design_test)
+idx = rownames(design_test) %in% colnames(otu_table)
+design_test = design_test[idx,]
+otu_sub = otu_table[,rownames(design_test)]
+
+otutab_t = as.data.frame(t(otu_sub))
+otutab_t[[Group]] = design[rownames(otutab_t),][[Group]]
+
+set.seed(325)
+otutab.pred = predict(rf, t(otu_sub) )  
+pre_tab = table(observed=otutab_t[,Group],
+                predicted=otutab.pred) 
+pre_tab
+
+capture.output(print(pre_tab), file = paste0("pre_tab_", Group, "_summary_fun.txt"))
+
+test_real_Group <- as.factor(design_test[[Group]]) 
+
+evaluation <- confusionMatrix(otutab.pred, test_real_Group)
+
+print(evaluation)
+capture.output(print(evaluation), file = paste0("evaluation_", Group, "_summary_fun.txt"))
+
+
+predict = data.frame(group = otutab_t[,Group], predicted=otutab.pred)
+
+write.table("SampleID\t", file=paste0("RF_prediction_binary_tax_", Group, "_fun.txt",sep=""),append = F, quote = F, eol = "", row.names = F, col.names = F)
+write.table(predict, file = paste0("RF_prediction_binary_tax_", Group, "_fun.txt"),append = T, quote = F, row.names = T, col.names = T, sep = "\t")
+```
