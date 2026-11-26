@@ -32,7 +32,7 @@ All raw sequencing data generated in this study have been deposited in the **Gen
 ## Repository Structure
 
 ```text
-Tang2026FC2/
+Tang2026FC/
 ├── README.md                     # Project overview, pipeline instructions, and reproducibility guide
 ├── amplicon/
 │   ├── 16S_moromi.sh             # Bacterial 16S rRNA (V3–V4) QC, VSEARCH/USEARCH denoising & rarefaction
@@ -49,6 +49,16 @@ Tang2026FC2/
 └── metagenomics/
     ├── WGS.sh                    # KneadData host depletion, MetaPhlAn2 & HUMAnN2 EC stratification
     └── WGS.qmd                   # KEGG Level 1–3 Welch's t-tests & species-enzyme contribution pies
+├── data/
+    ├── otutab_bac.txt          # ASV abundance matrix for bacteria
+    ├── otutab_fun.txt          # ASV abundance matrix for fungi
+    ├── sum_g_bac.txt           # genus abundance matrix for bacteria
+    ├── sum_g_fun.txt           # genus abundance matrix for fungi
+    ├── taxonomy_bac.txt        # taxonomy for bacterial ASV
+    ├── taxonomy_fun.txt        # taxonomy for fungal ASV
+    ├── metadata_bac.tsv        # Sample metadata for 16S
+    ├── metadata_fun.tsv        # Sample metadata for ITS
+    ├── metadata_WGS.tsv        # Sample metadata for metagenomics
 ```
 
 ---
@@ -56,16 +66,16 @@ Tang2026FC2/
 ## Software & Dependencies
 
 ### 1. Command-Line Bioinformatic Tools
-* **Amplicon Processing:** `fastp`, `FastQC` (v0.12.1), `VSEARCH` (v2.15.1), `USEARCH` (v10.0.240)
-* **Phylogenetic Visualization:** `GraPhlAn`
+* **Amplicon Processing:** `fastp` (v0.23.2), `FastQC` (v0.12.1), `VSEARCH` (v2.15.1), `USEARCH` (v10.0.240)
+* **Phylogenetic Visualization:** `GraPhlAn` (v1.1.3)
 * **Shotgun Metagenomics:** `FastQC` (v0.11.9), `MultiQC` (v1.11), `KneadData` (v0.6.1), `Trimmomatic` (v0.39), `Bowtie2` (v2.3.5), `HUMAnN2` (v2.8.1), `MetaPhlAn2` (v2.7.5), `DIAMOND` (v0.8.2.84)
 * **Differential Biomarker Discovery:** `LEfSe` (v1.1.2)
 
 ### 2. R Environment (`R >= 4.0.3`)
 Key R packages required across the Quarto (`.qmd`) analytical notebooks:
-* **Community Ecology & Networks:** `SpiecEasi` (v1.99.0), `igraph` (v1.6.0), `vegan`, `phyloseq`
-* **Machine Learning & Evaluation:** `randomForest` (v4.6-14), `caret`, `pROC`
-* **Data Manipulation & Visualization:** `tidyverse`, `dplyr`, `ggplot2` (v3.5.4), `pheatmap`, `ggrepel`, `patchwork`
+* **Community Ecology & Networks:** `SpiecEasi` (v1.99.0), `igraph` (v1.6.0), `vegan` (v2.6-10), `phyloseq` (v1.52.0)
+* **Machine Learning & Evaluation:** `randomForest` (v4.6-14), `caret` (v7.0-1), `pROC` (v1.18.5)
+* **Data Manipulation & Visualization:** `tidyverse` (v2.0.0), `dplyr` (v1.1.4), `ggplot2` (v3.5.4), `pheatmap` (v1.0.12), `ggrepel` (v0.9.6), `patchwork` (v1.3.1)
 
 ---
 
