@@ -1,37 +1,163 @@
-SampleID	Group	Stage	Disc	Time	DaysPostTransplant 	Position
-BQ11	BQ1	BQS1	D1	2020/10/22	0	112.9811,22.490016
-BQ12	BQ1	BQS1	D1	2020/10/22	0	112.9811,22.490016
-BQ13	BQ1	BQS1	D8	2020/10/22	0	112.9811,22.490016
-BQ14	BQ1	BQS1	D8	2020/10/22	0	112.9811,22.490016
-BQ15	BQ1	BQS1	D4	2020/10/22	0	112.9811,22.490016
-BQ16	BQ1	BQS1	D4	2020/10/22	0	112.9811,22.490016
-BQ21	BQ2	BQS1	D1	2020/10/22	8	112.9811,22.490016
-BQ22	BQ2	BQS1	D1	2020/10/22	8	112.9811,22.490016
-BQ23	BQ2	BQS1	D8	2020/10/22	8	112.9811,22.490016
-BQ24	BQ2	BQS1	D8	2020/10/22	8	112.9811,22.490016
-BQ25	BQ2	BQS1	D4	2020/10/22	8	112.9811,22.490016
-BQ26	BQ2	BQS1	D4	2020/10/22	8	112.9811,22.490016
-BQ31	BQ3	BQS2	D1	2020/10/23	16	112.9811,22.490016
-BQ32	BQ3	BQS2	D1	2020/10/23	16	112.9811,22.490016
-BQ33	BQ3	BQS2	D8	2020/10/23	16	112.9811,22.490016
-BQ34	BQ3	BQS2	D8	2020/10/23	16	112.9811,22.490016
-BQ35	BQ3	BQS2	D4	2020/10/23	16	112.9811,22.490016
-BQ36	BQ3	BQS2	D4	2020/10/23	16	112.9811,22.490016
-BQ41	BQ4	BQS2	D1	2020/10/23	24	112.9811,22.490016
-BQ42	BQ4	BQS2	D1	2020/10/23	24	112.9811,22.490016
-BQ43	BQ4	BQS2	D8	2020/10/23	24	112.9811,22.490016
-BQ44	BQ4	BQS2	D8	2020/10/23	24	112.9811,22.490016
-BQ45	BQ4	BQS2	D4	2020/10/23	24	112.9811,22.490016
-BQ46	BQ4	BQS2	D4	2020/10/23	24	112.9811,22.490016
-BQ51	BQ5	BQS2	D1	2020/10/23	32	112.9811,22.490016
-BQ52	BQ5	BQS2	D1	2020/10/23	32	112.9811,22.490016
-BQ53	BQ5	BQS2	D8	2020/10/23	32	112.9811,22.490016
-BQ54	BQ5	BQS2	D8	2020/10/23	32	112.9811,22.490016
-BQ55	BQ5	BQS2	D4	2020/10/23	32	112.9811,22.490016
-BQ56	BQ5	BQS2	D4	2020/10/23	32	112.9811,22.490016
-BQ61	BQ6	BQS2	D1	2020/10/24	40	112.9811,22.490016
-BQ62	BQ6	BQS2	D1	2020/10/24	40	112.9811,22.490016
-BQ63	BQ6	BQS2	D8	2020/10/24	40	112.9811,22.490016
-BQ64	BQ6	BQS2	D8	2020/10/24	40	112.9811,22.490016
-BQ65	BQ6	BQS2	D4	2020/10/24	40	112.9811,22.490016
-BQ66	BQ6	BQS2	D4	2020/10/24	40	112.9811,22.490016
+SampleID	Materials	Location	Equipment	Process	Fat	rfMaterials	rfLocation	rfEquipment	rfProcess	rfFat
+DSK0101	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0102	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0103	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0201	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0202	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0203	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0301	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0302	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0303	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0401	DSK	Sichuan	Koji_pool	Koji	Defatted	Train	Train	Train	Train	Train
+DSK0402	DSK	Sichuan	Koji_pool	Koji	Defatted	Test	Train	Train	Train	Test
+DSK0403	DSK	Sichuan	Koji_pool	Koji	Defatted	Test	Train	Train	Train	Test
+DSK0501	DSK	Sichuan	Koji_pool	Koji	Defatted	Test	Train	Train	Train	Test
+DSK0502	DSK	Sichuan	Koji_pool	Koji	Defatted	Test	Train	Train	Train	Test
+DSK0503	DSK	Sichuan	Koji_pool	Koji	Defatted	Test	Train	Train	Train	Test
+WSK0101	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+WSK0102	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+WSK0103	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+WSK0201	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+WSK0202	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+WSK0203	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0301	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0302	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0303	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0401	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0402	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0403	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0501	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0502	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+WSK0503	WSK	Sichuan	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+CT0201	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0301	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0302	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0303	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0401	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0402	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Train	Train	Train	Train
+CT0403	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+CT0501	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+CT0502	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+CT0503	WSK	Jiangmen	Koji_pool	Koji	FullFat	Train	Test	Train	Train	Train
+ZQ0601	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ0602	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ0603	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ1201	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ1202	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ1203	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ2001	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ2002	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Train	Test	Train	Train
+ZQ2003	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Test	Test	Train	Train
+ZQ4001	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Test	Test	Train	Train
+ZQ4002	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Test	Test	Train	Train
+ZQ4003	WSK	Shandong	Koji_pool	Koji	FullFat	Train	Test	Test	Train	Train
+YP0201	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0202	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0203	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0301	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0302	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0303	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0401	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0402	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0403	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0501	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0502	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+YP0503	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+BQ11	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+BQ12	WSK	Jiangmen	Koji_disk	Koji	FullFat	Train	Train	Train	Train	Train
+BQ13	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ14	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ15	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ16	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ21	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ22	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ23	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ24	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ25	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ26	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ31	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ32	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ33	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ34	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Train	Train
+BQ35	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Test	Train
+BQ36	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Test	Train
+BQ41	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Test	Train
+BQ42	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Train	Train	Test	Train
+BQ43	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Train	Test	Train
+BQ44	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Train	Test	Train
+BQ45	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Train	Test	Train
+BQ46	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Train	Test	Train
+BQ51	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ52	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ53	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ54	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ55	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ56	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ61	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ62	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ63	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ64	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ65	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+BQ66	WSK	Jiangmen	Koji_disk	Koji	FullFat	Test	Test	Test	Test	Train
+M1001	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M1101	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0201	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0301	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0401	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0901	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M1102	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M8	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M5	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0202	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0101	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M0102	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M1103	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Train
+M14	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M230	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M215	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M205	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M200	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M160	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M860	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M845	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M830	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M815	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M805	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M800	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M760	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M745	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M145	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M730	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M715	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M705	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M700	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M660	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M645	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M630	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M615	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M605	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M600	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M130	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M560	WSM	Korea	Koji_pool	Meju	FullFat	Train	Train	Train	Train	Test
+M545	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M530	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M515	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M505	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M500	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M460	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M445	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M430	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M415	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M115	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M405	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M400	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M360	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M345	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M330	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M315	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M305	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M300	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M260	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M245	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M105	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
+M100	WSM	Korea	Koji_pool	Meju	FullFat	Test	Test	Test	Test	Test
