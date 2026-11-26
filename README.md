@@ -47,8 +47,8 @@ Tang2026FC/
 ├── machine_learning/
 │   └── RandomForest.qmd          # Regional Random Forest classification, 5-fold rfcv & ROC evaluation
 └── metagenomics/
-    ├── WGS.sh                    # KneadData host depletion, MetaPhlAn2 & HUMAnN2 EC stratification
-    └── WGS.qmd                   # KEGG Level 1–3 Welch's t-tests & species-enzyme contribution pies
+│    ├── WGS.sh                    # KneadData host depletion, MetaPhlAn2 & HUMAnN2 EC stratification
+│    └── WGS.qmd                   # KEGG Level 1–3 Welch's t-tests & species-enzyme contribution pies
 ├── data/
     ├── otutab_bac.txt          # ASV abundance matrix for bacteria
     ├── otutab_fun.txt          # ASV abundance matrix for fungi
